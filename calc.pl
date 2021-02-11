@@ -7,7 +7,8 @@ use DateTime;
 my $general_debug0 = 0;
 my $d1debug = 0;
 my $d1_2debug = 0;
-my $d1_8debug = 0;
+my $d1_8critdebug = 1;
+my $d1_8holdebug = 1;
 
 
 # Constants
@@ -48,9 +49,13 @@ my $summer_peak_kwh = 0;
 my $summer_offpeak_kwh = 0;
 
 my ($date, $year, $time, $hour, $ampm, $month, $day, $usage, $dayofweek);
-
 # Note: dayofweek 1=Monday, 7=Sunday
 
+
+# D1.8 Vars
+
+my @d18_hol_dates = ();
+my @d18_crit_dates = ();
 
 sub usage 
 {
@@ -69,6 +74,56 @@ if(@ARGV != 1) {
 	usage;
 	exit 1;
 }
+
+
+open (my $holdata, '<', 'd18_holiday_dates.txt') or die "Could not open D1.8 holiday dates file.\n";
+while (my $line = <$holdata>)
+{
+	my @fields = split "/", $line;
+	$month = $fields[0];
+	$day = $fields[1];
+	$year = $fields[2];
+	chomp($year);
+
+	my $dt = DateTime->new(
+		year => $year,
+		month => $month,
+		day => $day,
+	);
+
+	push(@d18_hol_dates, $dt);
+
+        if ($d1_8holdebug == 1)
+        {
+                print "DEBUG: Adding D1.8 Holiday MM/DD/YYYY $month $day $year\n";
+        }
+}
+close($holdata);
+
+open (my $critdata, '<', 'd18_crit_dates.txt') or die "Could not open D1.8 critical peak dates file.\n";
+while (my $line = <$critdata>)
+{
+        my @fields = split "/", $line;
+        $month = $fields[0];
+        $day = $fields[1];
+        $year = $fields[2];
+        chomp($year);
+
+        my $dt = DateTime->new(
+                year => $year,
+                month => $month,
+                day => $day,
+        );
+
+        push(@d18_crit_dates, $dt);
+
+        if ($d1_8critdebug == 1)
+        {
+                print "DEBUG: Adding D1.8 Critical Peak Day MM/DD/YYYY $month $day $year\n";
+        }
+}
+close($critdata);
+	
 
 open (my $data, '<', $file) or die "Could not open input file $file.\n";
 
