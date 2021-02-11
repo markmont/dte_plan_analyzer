@@ -26,6 +26,12 @@ my $summer_offpeak_rate = 12.032;
 my $standard_rate_tier1 = 15.287;
 my $standard_rate_tier2 = 17.271;
 
+my $d18_off_rate = 11.405;
+my $d18_mid_rate = 15.832;
+my $d18_on_rate = 23.212;
+my $d18_crit_rate = 101.611;
+
+
 
 # Regular vars
 
