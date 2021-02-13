@@ -26,6 +26,10 @@ my $summer_offpeak_rate = 12.032;
 my $standard_rate_tier1 = 15.287;
 my $standard_rate_tier2 = 17.271;
 
+my $dpp_rate_on_peak = 23.212;
+my $dpp_rate_mid_peak = 15.832;
+my $dpp_rate_off_peak = 11.405;
+my $dpp_rate_critical_peak = 101.611;
 
 # Regular vars
 
@@ -40,6 +44,11 @@ my $winter_peak_kwh = 0;
 my $winter_offpeak_kwh = 0;
 my $summer_peak_kwh = 0;
 my $summer_offpeak_kwh = 0;
+
+my $dpp_critical_kwh = 0;
+my $dpp_on_kwh = 0;
+my $dpp_mid_kwh = 0;
+my $dpp_off_kwh = 0;
 
 my ($date, $year, $time, $hour, $ampm, $month, $day, $usage, $dayofweek);
 
@@ -63,6 +72,61 @@ if(@ARGV != 1) {
 	usage;
 	exit 1;
 }
+
+open (my $datafile, '<', $file) or die "Could not open input file $file.\n";
+
+my @peak_usage = ();
+my $peak_today = 0;
+while (my $line = <$datafile>)
+{
+	next if $. == 1; # skip first line
+
+	my @fields = split "," , $line;
+	$date = $fields[1];
+	$time = $fields[2];
+	$usage = $fields[3];
+
+	$date =~ s/\"//g;
+	$time =~ s/\"//g;
+	$usage =~ s/\"//g;
+
+	@fields = split "/", $date;
+	$month = $fields[0];
+	$day = $fields[1];
+	$year = $fields[2];
+
+	@fields = split ":", $time;
+	$hour = $fields[0];
+
+	@fields = split " ", $time;
+	$ampm = $fields[1];
+
+	if (($ampm eq "PM") && ($hour != 12)) { $hour = $hour + 12; }
+
+	if (($ampm eq "AM") && ($hour == 12)) { $hour = 0; }
+
+	my $dt = DateTime->new(
+		year => $year,
+		month => $month,
+		day => $day,
+	);
+	
+	$dayofweek = $dt->day_of_week;
+
+        next if ($dayofweek == 6) || ($dayofweek == 7); #It's a weekend
+        next if ($hour < 15) || ($hour > 19); # It's not peak
+
+        if ($hour == 15) { $peak_today = 0; }
+        $peak_today += $usage;
+        if ($hour == 19)
+        {
+                push (@peak_usage, { date => "$year-$month-$day", usage => $peak_today });
+        }
+}
+close ($datafile);
+my @top_peak_usage = sort { $b->{usage} <=> $a->{usage} } @peak_usage;
+@top_peak_usage = @top_peak_usage[0..13];
+my %is_date_critical_peak = map { $_->{date} => 1 } @top_peak_usage;
 
 open (my $data, '<', $file) or die "Could not open input file $file.\n";
 
@@ -236,6 +300,38 @@ while (my $line = <$data>)
                 }
 	}
 
+	#Accumulate dynamic peak pricing usage
+        if ( ($dayofweek == 6) || ($dayofweek == 7) # weekend
+          || (($month == 1) && ($day == 1)) # New Year's Day
+          || (($month == 4) && ($day == 10)) # Good Friday
+          || (($month == 5) && ($day == 25)) # Memorial Day
+          || (($month == 7) && ($day == 6)) # Independence Day
+          || (($month == 9) && ($day == 7)) # Labor Day
+          || (($month == 11) && ($day == 26)) # Thanksgiving
+          || (($month == 12) && ($day == 25)) # Christmas
+            )
+        {
+                $dpp_off_kwh += $usage;
+        }
+        elsif ($hour == 23 || $hour < 7)
+        {
+                $dpp_off_kwh += $usage;
+        }
+        elsif ($hour >= 15 && $hour <= 19)
+        {
+                if (defined($is_date_critical_peak{"$year-$month-$day"}))
+                {
+                        $dpp_critical_kwh += $usage;
+                }
+                else
+                {
+                        $dpp_on_kwh += $usage;
+                }
+        }
+        else
+        {
+                        $dpp_mid_kwh += $usage;
+        }
 }
 
 close ($data);
@@ -260,6 +356,16 @@ $summer_offpeak_kwh = int($summer_offpeak_kwh);
 $winter_peak_kwh = int($winter_peak_kwh);
 $winter_offpeak_kwh = int($winter_offpeak_kwh);
 
+my $dpp_critical_dollars = int(($dpp_critical_kwh * $dpp_rate_critical_peak) / 100);
+my $dpp_on_dollars = int(($dpp_on_kwh * $dpp_rate_on_peak) / 100);
+my $dpp_mid_dollars = int(($dpp_mid_kwh * $dpp_rate_mid_peak) / 100);
+my $dpp_off_dollars = int(($dpp_off_kwh * $dpp_rate_off_peak) / 100);
+my $total_dpp_kwh = int($dpp_critical_kwh + $dpp_on_kwh + $dpp_mid_kwh + $dpp_off_kwh);
+my $total_dpp_dollars = $dpp_critical_dollars + $dpp_on_dollars + $dpp_mid_dollars + $dpp_off_dollars;
+$dpp_critical_kwh = int($dpp_critical_kwh);
+$dpp_on_kwh = int($dpp_on_kwh);
+$dpp_mid_kwh = int($dpp_mid_kwh);
+$dpp_off_kwh = int($dpp_off_kwh);
 
 print "\n\n";
 print "---Standard D1 Plan---\n";
@@ -275,6 +381,16 @@ print "Winter Peak     kWh: $winter_peak_kwh Cost: \$$winter_peak_dollars\n";
 print "Winter Off-Peak kWh: $winter_offpeak_kwh Cost: \$$winter_offpeak_dollars\n";
 print "Total           kWh: $total_tod_kwh Cost: \$$total_tod_dollars\n";
 
-
-
+print "\n";
+print "---Dynamic Peak Pricing Plan (worst case)---\n";
+print "Days with top peak-hours usage:\n";
+foreach my $d (@top_peak_usage)
+{
+        printf ("    %s %2.3f kWh \$%2.2f\n", $d->{date}, $d->{usage}, $d->{usage} * $dpp_rate_critical_peak / 100);
+}
+print "Critical-Peak   kWh: $dpp_critical_kwh Cost: \$$dpp_critical_dollars\n";
+print "On-Peak         kWh: $dpp_on_kwh Cost: \$$dpp_on_dollars\n";
+print "Mid-Peak        kWh: $dpp_mid_kwh Cost: \$$dpp_mid_dollars\n";
+print "Off-Peak        kWh: $dpp_off_kwh Cost: \$$dpp_off_dollars\n";
+print "Total           kWh: $total_dpp_kwh Cost: \$$total_dpp_dollars\n";
 
